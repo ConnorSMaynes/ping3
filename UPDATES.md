@@ -1,4 +1,6 @@
 # UPDATES
+* 5.0.0:
+	* Feature: Return response packet info along with ping delay time for analysis purposes. This breaks the old api by no longer just returning the delay from `receive_one_ping` or `ping`
 * 4.0.0:
     * Feature: Now errors `TimeToLiveExpired`, `DestinationUnreachable` and `DestinationHostUnreachable` have `ip_header` and `icmp_header` attached. ( #48 )
 * 3.0.1:
