@@ -209,6 +209,7 @@ def receive_one_ping(sock: socket, icmp_id: int, seq: int, timeout: int) -> floa
         icmp_header_slice = slice(0, struct.calcsize(ICMP_HEADER_FORMAT))  # [0:8]
     timeout_time = time.time() + timeout  # Exactly time when timeout.
     _debug("Timeout time: {} ({})".format(time.ctime(timeout_time), timeout_time))
+    rsp = {}
     while True:
         timeout_left = timeout_time - time.time()  # How many seconds left until timeout.
         timeout_left = timeout_left if timeout_left > 0 else 0  # Timeout must be non-negative
@@ -222,9 +223,8 @@ def receive_one_ping(sock: socket, icmp_id: int, seq: int, timeout: int) -> floa
         if has_ip_header:
             ip_header_raw = recv_data[ip_header_slice]
             ip_header = read_ip_header(ip_header_raw)
+            rsp.update(ip_header)
             _debug("Received IP header:", ip_header)
-        else:
-            ip_header = None
         icmp_header_raw, icmp_payload_raw = recv_data[icmp_header_slice], recv_data[icmp_header_slice.stop:]
         icmp_header = read_icmp_header(icmp_header_raw)
         _debug("Received ICMP header:", icmp_header)
@@ -252,7 +252,8 @@ def receive_one_ping(sock: socket, icmp_id: int, seq: int, timeout: int) -> floa
             if icmp_header['type'] == IcmpType.ECHO_REPLY:
                 time_sent = struct.unpack(ICMP_TIME_FORMAT, icmp_payload_raw[0:struct.calcsize(ICMP_TIME_FORMAT)])[0]
                 _debug("Received sent time: {} ({})".format(time.ctime(time_sent), time_sent))
-                return time_recv - time_sent
+                rsp['delay'] = time_recv - time_sent
+                return rsp
         _debug("Uncatched ICMP packet:", icmp_header)
 
 
@@ -272,7 +273,8 @@ def ping(dest_addr: str, timeout: int = 4, unit: str = "s", src_addr: str = None
         size: The ICMP packet payload size in bytes. If the input of this is less than the bytes of a double format (usually 8), the size of ICMP packet payload is 8 bytes to hold a time. The max should be the router_MTU(Usually 1480) - IP_Header(20) - ICMP_Header(8). Default is 56, same as in macOS. (default 56)
 
     Returns:
-        The delay in seconds/milliseconds, False on error and None on timeout.
+        A dictionary of the headers from the reply packet as well as the calculated
+            delay between sending and receiving.
 
     Raises:
         PingError: Any PingError will raise again if `ping3.EXCEPTIONS` is True.
@@ -308,7 +310,7 @@ def ping(dest_addr: str, timeout: int = 4, unit: str = "s", src_addr: str = None
         icmp_id = zlib.crc32("{}{}".format(process_id, thread_id).encode()) & 0xffff  # to avoid icmp_id collision.
         try:
             send_one_ping(sock=sock, dest_addr=dest_addr, icmp_id=icmp_id, seq=seq, size=size)
-            delay = receive_one_ping(sock=sock, icmp_id=icmp_id, seq=seq, timeout=timeout)  # in seconds
+            rsp = receive_one_ping(sock=sock, icmp_id=icmp_id, seq=seq, timeout=timeout)  # in seconds
         except errors.Timeout as err:
             _debug(err)
             _raise(err)
@@ -317,11 +319,11 @@ def ping(dest_addr: str, timeout: int = 4, unit: str = "s", src_addr: str = None
             _debug(err)
             _raise(err)
             return False
-        if delay is None:
+        if not rsp:
             return None
         if unit == "ms":
-            delay *= 1000  # in milliseconds
-        return delay
+            rsp['delay'] *= 1000  # in milliseconds
+        return rsp
 
 
 @_func_logger
